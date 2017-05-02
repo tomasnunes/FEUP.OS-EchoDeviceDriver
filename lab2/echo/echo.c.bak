@@ -1,0 +1,33 @@
+/*                                                     
+ * $Id: hello.c,v 1.5 2004/10/26 03:32:21 corbet Exp $ 
+ */                                                    
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/slab.h>
+#include <linux/mm.h>
+#include <linux/types.h>
+MODULE_LICENSE("Dual BSD/GPL");
+
+#define FIRSTMINOR 0
+#define NUMDEVS 1
+
+static dev_t devID; 
+static char *name = "echo";
+
+static int hello_init(void)
+{
+	if(alloc_chrdev_region(&devID, FIRSTMINOR, NUMDEVS, name))
+		printk(KERN_ALERT "Failed alloc... :(");
+	
+	printk(KERN_ALERT "Hello %d\n", MAJOR(devID));
+	return 0;
+}
+
+static void hello_exit(void)
+{
+	printk(KERN_ALERT "Goodbye, my fellow device %d!\n", MAJOR(devID));
+	unregister_chrdev_region(devID, NUMDEVS);
+}
+
+module_init(hello_init);
+module_exit(hello_exit);
