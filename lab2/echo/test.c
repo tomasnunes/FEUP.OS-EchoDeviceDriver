@@ -15,19 +15,20 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    int fd = open(argv[1], O_WRONLY);
+    int fd = open(argv[1], O_RDWR);
     if(fd == -1) {
         printf("Error: cannot open file %s\n", argv[1]);
         return -1;
     }
 
     char *buff = (char *)malloc(MAX_BUFF_SIZE);
-    strcpy(buff, "      -U- I'm in kernel space!\n      -U- Hello 'K'!\n");
+    strcpy(buff, ">I'm in kernel space!\n           >Hello 'K'!!\n");
 
-    int cwrite = write(fd, buff, MAX_BUFF_SIZE);
-    int cread = read(fd, buff, MAX_BUFF_SIZE);
+    ssize_t cwrite = write(fd, buff, strlen(buff));
+    //cwrite = write(fd, buff, strlen(buff));
+    ssize_t cread = read(fd, buff, MAX_BUFF_SIZE);
 
-    printf("    -T- echo_write returned: %d\n    -T- echo_read returned: %d\n", cwrite, cread);
+    printf("    -T- echo_write returned: %ld\n    -T- echo_read returned: %ld\n", cwrite, cread);
 
     free(buff);
     close(fd);

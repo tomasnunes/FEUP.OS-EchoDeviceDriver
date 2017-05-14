@@ -6,50 +6,58 @@
 
 #include "echo.h"
 
-int echo_numdevs = ECHO_NUMDEVS;
-int echo_minor = ECHO_MINOR;
-int echo_major = ECHO_MAJOR;
-int echo_devnum = 0;
+int echo_numdevs 	= ECHO_NUMDEVS;
+int echo_minor 		= ECHO_MINOR;
+int echo_major 		= ECHO_MAJOR;
+//dev_t echo_devnum = 0;
 
 module_param(echo_numdevs, int, S_IRUGO);
-module_param(echo_major, int, S_IRUGO);
-module_param(echo_minor, int, S_IRUGO);
+//module_param(echo_major, int, S_IRUGO);
+//module_param(echo_minor, int, S_IRUGO);
 
-static dev_t dev;
-static char *name = "echo";
-static struct echo_dev echo_device;
+const static char *name = "echo";
+struct echo_dev *echo_devices;
 
 struct file_operations echo_fops = {
-	.owner = THIS_MODULE,
-	.open = echo_open,
-	.read = echo_read,
-	.write = echo_write,
-	.llseek = no_llseek,
-	.release = echo_release
+	.owner 		= THIS_MODULE,
+	.open 		= echo_open,
+	.read 		= echo_read,
+	.write 		= echo_write,
+	.llseek 	= no_llseek,
+	.release	= echo_release
 };
 
 int echo_module_init(void) {
-	if(alloc_chrdev_region(&dev, echo_minor, echo_numdevs, name)) {
+	int ii;
+	dev_t echo_dev = 0;
+
+	if(alloc_chrdev_region(&echo_dev, echo_minor, echo_numdevs, name) < 0) {
 		printk(KERN_ALERT "Failed alloc... :(");
 		return -1;
 	}
-	echo_major = MAJOR(dev);
-	echo_minor = MINOR(dev);
-	echo_devnum = MKDEV(echo_major, echo_minor);
+	echo_major 	= MAJOR(echo_dev);
+	echo_minor	= MINOR(echo_dev);
 
-	if(!(echo_device.cdev = cdev_alloc())) {
-		printk(KERN_ALERT "Failed alloc char device... :(");
-		unregister_chrdev_region(echo_devnum, echo_numdevs);
+	echo_devices = kzalloc(echo_numdevs * sizeof(struct echo_dev), GFP_KERNEL);
+	if(!echo_devices) {
+		printk(KERN_ALERT "Failed alloc memory for devices... :(");
+		unregister_chrdev_region(echo_dev, echo_numdevs);
 		return -1;
 	}
-	cdev_init(echo_device.cdev, &echo_fops);
-	echo_device.cdev->owner = THIS_MODULE;
-	echo_device.cdev->ops = &echo_fops;
 
-	if(cdev_add(echo_device.cdev, echo_devnum, 1) < 0) {
-		printk(KERN_ALERT "Failed cdev_add... :(");
-		unregister_chrdev_region(echo_devnum, echo_numdevs);
-		return -1;
+	for(ii=0; ii<echo_numdevs; ++ii) {
+		cdev_init(&(echo_devices[ii].cdev), &echo_fops);
+		echo_devices[ii].cdev.owner = THIS_MODULE;
+		echo_devices[ii].cdev.ops = &echo_fops;
+		echo_devices[ii].f_write = 0;
+		echo_devices[ii].f_read = 0;
+		echo_devices[ii].cwrite = 0;
+
+		echo_dev = MKDEV(echo_major, echo_minor + ii);
+		if(cdev_add(&(echo_devices[ii].cdev), echo_dev, 1))
+			printk(KERN_ALERT "Failed cdev_add on %d device... :(", ii);
+
+		printk(KERN_INFO "  -K- device %d was created!\n", echo_dev);
 	}
 
 	printk(KERN_NOTICE "\n!Hello %d!\n\n", echo_major);
@@ -57,11 +65,14 @@ int echo_module_init(void) {
 }
 
 int echo_open(struct inode *inodeptr, struct file *fileptr) {
+	struct echo_dev *echo_device;
+
 	//Informs kernel that 'echo' is non seekable (Blocks lseek() calls for 'echo')
 	nonseekable_open(inodeptr, fileptr);
 
-	fileptr->private_data = echo_device.cdev;
-	printk(KERN_INFO "  -K- echo_open can access cdev through file.private_data!\n");
+	echo_device = container_of(inodeptr->i_cdev, struct echo_dev, cdev);
+	fileptr->private_data = echo_device;
+	printk(KERN_INFO "  -K- echo_open, echo_device can be accessed through fileptr!\n");
 
 	return 0;
 }
@@ -73,51 +84,73 @@ int echo_release(struct inode *inodeptr, struct file *fileptr) {
 }
 
 ssize_t echo_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *offptr) {
-	static int f_error;
-	ssize_t cread = 0;
+	//static int f_error;
+	//ssize_t cread = 0;
+	struct echo_dev *echo_device = fileptr->private_data;
 
 	printk(KERN_INFO "  -K- echo_read was invoked!\n");
+	printk(KERN_INFO "    -KR- There was a total of %d chars written to 'echo'!\n", echo_device->cwrite);
 
-	return cread;
+	return 0;
 }
 
 ssize_t echo_write(struct file *fileptr, const char __user *buff, size_t cmax, loff_t *offptr) {
 	//Keep declarations and code separated, ISO C90 forbis it!
-	static ssize_t f_error = 0;
-	ssize_t cwrite = 0, error;
-	char *kbuff = kmalloc(cmax+1, GFP_KERNEL);
+	ssize_t cwrite = 0, error = 0;
+	struct echo_dev *echo_device = fileptr->private_data;
+	char *kbuff = kzalloc(cmax+1, GFP_KERNEL);
+	if(!kbuff) {
+		printk(KERN_ALERT "  -K- echo_write could NOT alloc memory!\n");
+		return -1;
+	}
 
 	printk(KERN_INFO "  -K- echo_write was invoked!\n");
-	/*if((f_error =! 0)) { //Double parentheses to avoid warning... (Don't ask me??)
+	if(echo_device->f_write) { //Double parentheses to avoid warning
 		kfree(kbuff);
-		error = f_error;
-		f_error = 0;
+		error = echo_device->f_write;
+		echo_device->f_write = 0;
 		return error;
-	}*/
+	}
 
 	printk(KERN_INFO "  -K- echo_write was invoked!\n");
 	cwrite = cmax - copy_from_user(kbuff, buff, cmax);
+	//printk(KERN_INFO "-(%d)-\n", cwrite);
+	//cwrite = cmax - cwrite;
+	echo_device->cwrite += cwrite;
 	kbuff[cwrite] = '\0';
 
 	if(cwrite == 0) {
-		f_error = 0;
+		echo_device->f_write = 0;
 		return -EFAULT; //No char written, return error
 	}
 	else if(cwrite < cmax)
-		f_error = -EFAULT; //Flags error to return on next call
+		echo_device->f_write = -EFAULT; //Flags error to return on next call
 	else
-		f_error = 0;
+		echo_device->f_write = 0;
 
-	printk(KERN_NOTICE "%s", kbuff);
+	printk(KERN_NOTICE "      -KW- %s", kbuff);
 
 	kfree(kbuff);
 	return cwrite;
 }
 
 void echo_module_exit(void) {
-	cdev_del(echo_device.cdev);
+	int ii;
+	dev_t echo_dev = MKDEV(echo_major, echo_minor);
+
+	if(echo_devices) {
+		for(ii=0; ii<echo_numdevs; ++ii) {
+			cdev_del(&(echo_devices[ii].cdev));
+		}
+
+		kfree(echo_devices);
+		echo_devices = NULL;
+	}
+
 	printk(KERN_NOTICE "\n!Goodbye, my fellow device %d!\n\n", echo_major);
-	unregister_chrdev_region(echo_devnum, echo_numdevs);
+	unregister_chrdev_region(echo_dev, echo_numdevs);
+
+	return(0);
 }
 
 module_init(echo_module_init);
