@@ -1,8 +1,6 @@
 /*
  * $Id: echo.c,v 1.0 2017/04/30 $
  */
-//MODULE_LICENSE("Dual BSD/GPL");
-//MODULE_AUTHOR("Mafalda Varela & Tomas Nunes");
 
 #include "echo.h"
 
@@ -14,6 +12,9 @@ int echo_major 		= ECHO_MAJOR;
 module_param(echo_numdevs, int, S_IRUGO);
 //module_param(echo_major, int, S_IRUGO);
 //module_param(echo_minor, int, S_IRUGO);
+
+MODULE_LICENSE("Dual BSD/GPL");
+MODULE_AUTHOR("Mafalda Varela & Tomas Nunes");
 
 const static char *name = "echo";
 struct echo_dev *echo_devices;
@@ -98,18 +99,20 @@ ssize_t echo_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 	//Keep declarations and code separated, ISO C90 forbis it!
 	ssize_t cwrite = 0, error = 0;
 	struct echo_dev *echo_device = fileptr->private_data;
-	char *kbuff = kzalloc(cmax+1, GFP_KERNEL);
-	if(!kbuff) {
-		printk(KERN_ALERT "  -K- echo_write could NOT alloc memory!\n");
-		return -1;
-	}
+	char *kbuff;
 
 	printk(KERN_INFO "  -K- echo_write was invoked!\n");
-	if(echo_device->f_write) { //Double parentheses to avoid warning
+	if(echo_device->f_write) {
 		kfree(kbuff);
 		error = echo_device->f_write;
 		echo_device->f_write = 0;
 		return error;
+	}
+
+	kbuff = kzalloc(cmax+1, GFP_KERNEL);
+	if(!kbuff) {
+		printk(KERN_ALERT "  -K- echo_write could NOT alloc memory!\n");
+		return -1;
 	}
 
 	printk(KERN_INFO "  -K- echo_write was invoked!\n");
