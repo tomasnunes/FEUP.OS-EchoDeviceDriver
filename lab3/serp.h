@@ -23,6 +23,8 @@
 #include <linux/errno.h>
 #include <asm/uaccess.h>
 
+#define SERP_MINOR    0
+#define SERP_MAJOR    0
 #define SERP_NUMDEVS  1
 #define SERP_NUMPORTS 8
 #define SERP_FREQ     115200
@@ -32,15 +34,12 @@
 #define ADDRESS_COM3  0x0 //NOT IN USE
 #define ADDRESS_COM4  0x0 //NOT IN USE
 #define MAX_COMS      4
-
-#define SERP_MINOR 0
-#define SERP_MAJOR 0
-#define SERP_NUMDEVS 1
+#define SERP_DELAY    5 //Jiffies
 
 struct serp_dev {
   struct cdev cdev;
-  int f_write;
-  //int f_read;
+  int f_write; //Flags error in serp_write
+  int f_idle; //Flags user idle, returns chars read
   ssize_t cwrite; //Counter of written chars
   struct resource *uart;
   unsigned char lcr;
@@ -55,6 +54,7 @@ extern int serp_numdevs;
 extern long serp_bitrate;
 extern long serp_freq;
 extern unsigned long coms_address[MAX_COMS];
+extern int serp_delay;
 
 int serp_open(struct inode *inodeptr, struct file *fileptr);
 int serp_release(struct inode *inodeptr, struct file *fileptr);

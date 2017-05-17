@@ -16,6 +16,7 @@ int serp_numdevs  = SERP_NUMDEVS;
 int serp_numports = SERP_NUMPORTS;
 long serp_freq    = SERP_FREQ;
 long serp_bitrate = SERP_BITRATE;
+int serp_delay		= SERP_DELAY;
 
 //Base address of each COM port
 unsigned long coms_address[MAX_COMS] = { ADDRESS_COM1,
@@ -67,7 +68,7 @@ int serp_module_init(void) {
 			printk(KERN_ALERT "Failed cdev_add on %d device... :(", ii);
 
 		serp_devices[ii].f_write = 0;
-		//serp_devices[ii].f_read = 0;
+		serp_devices[ii].f_idle = 0;
 		serp_devices[ii].cwrite = 0;
 		serp_devices[ii].lcr = 0;
 		serp_devices[ii].dll = 0;
@@ -118,7 +119,7 @@ int serp_open(struct inode *inodeptr, struct file *fileptr) {
 }
 
 ssize_t serp_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *offptr) {
-	int ii;
+	int ii = 0;
 	ssize_t cread = 0;
 	struct serp_dev *serp_device = fileptr->private_data;
 	char *kbuff;
@@ -131,19 +132,30 @@ ssize_t serp_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 		return -1;
 	}
 
-	while((cread < cmax) && (inb(serp_device->uart->start + UART_LSR) & UART_LSR_DR)) {
+	serp_device->f_idle = 0;
+	while(!serp_device->f_idle && cread < cmax) {
 		if(inb(serp_device->uart->start + UART_LSR) & UART_LSR_OE) {
-			printk(KERN_ALERT "  -K- serp_read could NOT read a char, is not sufficiently fast!\n");
+			printk(KERN_ALERT "  -K- serp_read there was an Override Error, is not sufficiently fast!\n");
 			return -EIO;
 		}
-		kbuff[cread++] = inb(serp_device->uart->start + UART_RX);
-		//outb((serp_device->uart->start + UART_LSR) & (~UART_LSR_THRE), serp_device->uart->start + UART_LSR);
-	}
-
-	//No char to read!
-	if(!cread) {
-		printk(KERN_ALERT "  -K- serp_read there was no char to read.. Try me later!\n");
-		return -EAGAIN;
+		else if(inb(serp_device->uart->start + UART_LSR) & UART_LSR_FE) {
+			printk(KERN_ALERT "  -K- serp_read there was a Farming Error!\n");
+			return -1;
+		}
+		else if(inb(serp_device->uart->start + UART_LSR) & UART_LSR_PE) {
+			printk(KERN_ALERT "  -K- serp_read there was a Parity Error!\n");
+			return -1;
+		}
+		else if(inb(serp_device->uart->start + UART_LSR) & UART_LSR_DR) {
+			kbuff[cread++] = inb(serp_device->uart->start + UART_RX);
+			ii = 0;
+		}
+		else {
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(serp_delay);
+			if(++ii == 50)
+				serp_device->f_idle = 1;
+		}
 	}
 
 	kbuff[cread] = '\0';
@@ -195,7 +207,8 @@ ssize_t serp_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 		serp_device->thr = kbuff[ii];
 
 		while(!(inb(serp_devices->uart->start + UART_LSR) & UART_LSR_THRE)) {
-			; //schedule();
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(serp_delay);
 		}
 
 		outb((unsigned char)serp_device->thr, serp_device->uart->start + UART_TX);
