@@ -24,10 +24,16 @@ int main(int argc, char *argv[]) {
     strcpy(buff, "Hello from the othersiiiiiiide!\n");
 
     ssize_t cwrite = write(fd, buff, strlen(buff));
-    //cwrite = write(fd, buff, strlen(buff));
-    //ssize_t cread = read(fd, buff, MAX_BUFF_SIZE);
+    printf("    -T- I send %ld chars from the otherside:\n%s\n", cwrite, buff);
 
-    printf("    -T- echo_write returned: %ld\n", cwrite);//    -T- echo_read returned: %ld\n", cwrite, cread);
+    ssize_t cread = read(fd, buff, MAX_BUFF_SIZE);
+
+    if(cread > 0)
+      printf("    -T- I got %ld chars from the otherside:\n%s\n", cread, buff);
+    else
+      printf("    -T- There was an error reading!\n");
+
+    printf("    -T- echo_write returned: %ld\n    -T- echo_read returned: %ld\n", cwrite, cread);
 
     free(buff);
     close(fd);

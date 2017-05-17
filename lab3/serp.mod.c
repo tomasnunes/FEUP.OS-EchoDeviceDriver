@@ -22,6 +22,7 @@ __attribute__((section("__versions"))) = {
 	{ 0x1992a2ba, "param_set_long" },
 	{ 0x89b301d4, "param_get_int" },
 	{ 0x98bd6f46, "param_set_int" },
+	{ 0x2da418b5, "copy_to_user" },
 	{ 0xd85a396a, "cdev_add" },
 	{ 0xbb37bf2e, "cdev_init" },
 	{ 0x852abecf, "__request_region" },

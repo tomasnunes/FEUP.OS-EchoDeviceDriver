@@ -59,6 +59,6 @@ extern unsigned long coms_address[MAX_COMS];
 int serp_open(struct inode *inodeptr, struct file *fileptr);
 int serp_release(struct inode *inodeptr, struct file *fileptr);
 ssize_t serp_write(struct file *fileptr, const char __user *buff, size_t cmax, loff_t *offptr);
-//ssize_t serp_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *offptr);
+ssize_t serp_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *offptr);
 
 #endif
