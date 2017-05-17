@@ -22,7 +22,7 @@ int serp_delay		= SERP_DELAY;
 unsigned long coms_address[MAX_COMS] = { ADDRESS_COM1,
 																				 ADDRESS_COM2,
 																				 ADDRESS_COM3,
-																				 ADDRESS_COM4 };
+																				 ADDRESS_COM4};
 
 //Get number of devices from script
 module_param(serp_numdevs, int, S_IRUGO);
@@ -114,13 +114,13 @@ int serp_open(struct inode *inodeptr, struct file *fileptr) {
 	serp_device->lcr &= ~UART_LCR_DLAB;
 	outb(serp_device->lcr, serp_device->uart->start + UART_LCR);
 
-	printk(KERN_ALERT "  -K- serp_open initialized device with %ld freq | %ld bit-rate | %d dl (dlm-%d  dll-%d)\n", serp_freq, serp_bitrate, dl, serp_device->dlm, serp_device->dll);
+	printk(KERN_ALERT "  -K- serp_open initialized device with %ld frequency and %ld bit-rate\n", serp_freq, serp_bitrate);
 
 	return 0;
 }
 
 ssize_t serp_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *offptr) {
-	long long counter = 0;
+	int counter = 0;
 	ssize_t cread = 0;
 	struct serp_dev *serp_device = fileptr->private_data;
 	char *kbuff;
@@ -134,31 +134,26 @@ ssize_t serp_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 	}
 
 	serp_device->f_idle = 0;
-
-	//TEMPORARY!! REMOVE LATER, prevent Overrun!
-	//inb(serp_device->uart->start + UART_RX);
-
-	while(/*(serp_device->f_idle < 100 &&*/ (cread < cmax-1) || !cread) {
+	while((!serp_device->f_idle && cread < cmax-1) || !cread) {
 		serp_device->lsr = inb(serp_device->uart->start + UART_LSR);
 
-		if(serp_device->lsr & UART_LSR_DR) {
-			kbuff[cread++] = inb(serp_device->uart->start + UART_RX);
-			//printk(KERN_ALERT "%c", kbuff[cread-1]);
-			serp_device->f_idle = 0;
-			counter = 0;
-		}
-		else if(serp_device->lsr & UART_LSR_OE) {
+		if(serp_device->lsr & UART_LSR_OE) {
 			printk(KERN_ALERT "  -K- serp_read there was an Overrun Error, is not sufficiently fast!\n");
 			return -EIO;
 		}
-		/*else {
-			if(++counter > 10000000) {
-				set_current_state(TASK_INTERRUPTIBLE);
-				schedule_timeout(serp_delay);
-				//msleep_interruptible(serp_delay);
-				++(serp_device->f_idle);
-			}
-		}*/
+		else if(serp_device->lsr & UART_LSR_DR) {
+			kbuff[cread++] = inb(serp_device->uart->start + UART_RX);
+			//printk(KERN_ALERT "%c", kbuff[cread-1]);
+			counter = 0;
+			serp_device->f_idle = 0;
+		}
+		else {
+			//set_current_state(TASK_INTERRUPTIBLE);
+			//schedule_timeout(serp_delay);
+			msleep_interruptible(5);
+			if(++counter == 200)
+				serp_device->f_idle = 1;
+		}
 	}
 
 	kbuff[cread] = '\0';

@@ -28,7 +28,7 @@ __attribute__((section("__versions"))) = {
 	{ 0x852abecf, "__request_region" },
 	{ 0x29537c9e, "alloc_chrdev_region" },
 	{ 0x2323fd40, "nonseekable_open" },
-	{ 0x17d59d01, "schedule_timeout" },
+	{ 0xcc5005fe, "msleep_interruptible" },
 	{ 0xf2a644fb, "copy_from_user" },
 	{ 0x12f237eb, "__kzalloc" },
 	{ 0x7485e15e, "unregister_chrdev_region" },

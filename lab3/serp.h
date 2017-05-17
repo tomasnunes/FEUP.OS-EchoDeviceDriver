@@ -9,6 +9,7 @@
 #include <linux/ioport.h>
 #include <asm/io.h>
 #include <linux/sched.h>
+#include <linux/delay.h>
 
 #include <linux/init.h>
 #include <linux/module.h>
@@ -26,7 +27,7 @@
 #define SERP_MINOR    0
 #define SERP_MAJOR    0
 #define SERP_NUMDEVS  1
-#define SERP_NUMPORTS 8
+#define SERP_NUMBYTES 8
 #define SERP_FREQ     115200
 #define SERP_BITRATE  1200
 #define ADDRESS_COM1  0x3f8
@@ -34,7 +35,7 @@
 #define ADDRESS_COM3  0x0 //NOT IN USE
 #define ADDRESS_COM4  0x0 //NOT IN USE
 #define MAX_COMS      4
-#define SERP_DELAY    5 //Jiffies
+#define SERP_DELAY    1
 
 struct serp_dev {
   struct cdev cdev;
@@ -45,12 +46,14 @@ struct serp_dev {
   unsigned char lcr;
   unsigned char dll;
   unsigned char dlm;
+  unsigned char lsr;
   char thr;
 };
 
 extern int serp_minor;
 extern int serp_major;
 extern int serp_numdevs;
+extern int serp_numbytes;
 extern long serp_bitrate;
 extern long serp_freq;
 extern unsigned long coms_address[MAX_COMS];

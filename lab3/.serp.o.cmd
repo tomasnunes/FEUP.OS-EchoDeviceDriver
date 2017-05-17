@@ -259,6 +259,8 @@ deps_/home/so/share/lab3/serp.o := \
   include/linux/sysfs.h \
     $(wildcard include/config/sysfs.h) \
   include/linux/pm.h \
+  include/linux/delay.h \
+  include/asm/delay.h \
   include/linux/module.h \
     $(wildcard include/config/modversions.h) \
     $(wildcard include/config/unused/symbols.h) \
