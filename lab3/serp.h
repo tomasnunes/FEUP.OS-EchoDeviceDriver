@@ -35,13 +35,15 @@
 #define ADDRESS_COM3  0x0 //NOT IN USE
 #define ADDRESS_COM4  0x0 //NOT IN USE
 #define MAX_COMS      4
-#define SERP_DELAY    1
+#define SERP_DELAY    10
 
 struct serp_dev {
   struct cdev cdev;
   int f_write; //Flags error in serp_write
+  int f_read; //Flags error in serp_read
   int f_idle; //Flags user idle, returns chars read
   ssize_t cwrite; //Counter of written chars
+  ssize_t cread; //Counter of read chars
   struct resource *uart;
   unsigned char lcr;
   unsigned char dll;

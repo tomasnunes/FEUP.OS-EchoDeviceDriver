@@ -67,14 +67,6 @@ int serp_module_init(void) {
 		if(cdev_add(&(serp_devices[ii].cdev), serp_dev, 1))
 			printk(KERN_ALERT "Failed cdev_add on %d device... :(", ii);
 
-		serp_devices[ii].f_write = 0;
-		serp_devices[ii].f_idle = 0;
-		serp_devices[ii].cwrite = 0;
-		serp_devices[ii].lcr = 0;
-		serp_devices[ii].dll = 0;
-		serp_devices[ii].dlm = 0;
-		serp_devices[ii].lsr = 0;
-
 		serp_devices[ii].uart = request_region(coms_address[ii], serp_numbytes, name);
   	if(!serp_devices[ii].uart) {
   		printk(KERN_ALERT "Failed request_region for device %d... :(", ii);
@@ -99,16 +91,26 @@ int serp_open(struct inode *inodeptr, struct file *fileptr) {
 	serp_device = container_of(inodeptr->i_cdev, struct serp_dev, cdev);
 	fileptr->private_data = serp_device;
 
-	serp_device->lcr = 0x0 | UART_LCR_WLEN8
-												 | UART_LCR_STOP
-												 | UART_LCR_PARITY | UART_LCR_EPAR
-												 | UART_LCR_DLAB;
+	serp_device->f_write 	= 0;
+	serp_device->f_read 	= 0;
+	serp_device->f_idle 	= 0;
+	serp_device->cwrite 	= 0;
+	serp_device->cread 		= 0;
+	serp_device->lcr 			= 0;
+	serp_device->dll 			= 0;
+	serp_device->dlm 			= 0;
+	serp_device->lsr 			= 0;
+
+	serp_device->lcr |= UART_LCR_WLEN8
+									 | UART_LCR_STOP
+									 | UART_LCR_PARITY | UART_LCR_EPAR
+									 | UART_LCR_DLAB;
 	outb(serp_device->lcr, serp_device->uart->start + UART_LCR);
 
-	serp_device->dll = 0x0 | (dl & 0x00FF);
+	serp_device->dll |= (dl & 0x00FF);
 	outb(serp_device->dll, serp_device->uart->start + UART_DLL);
 
-	serp_device->dlm = 0x0 | (dl >> 8);
+	serp_device->dlm |= (dl >> 8);
 	outb(serp_device->dlm, serp_device->uart->start + UART_DLM);
 
 	serp_device->lcr &= ~UART_LCR_DLAB;
@@ -135,10 +137,7 @@ ssize_t serp_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 
 	serp_device->f_idle = 0;
 
-	//TEMPORARY!! REMOVE LATER, prevent Overrun!
-	//inb(serp_device->uart->start + UART_RX);
-
-	while(/*(serp_device->f_idle < 100 &&*/ (cread < cmax-1) || !cread) {
+	while((serp_device->f_idle < 100 && (cread < cmax-1)) || (!cread && !serp_device->f_read)) {
 		serp_device->lsr = inb(serp_device->uart->start + UART_LSR);
 
 		if(serp_device->lsr & UART_LSR_DR) {
@@ -149,18 +148,26 @@ ssize_t serp_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 		}
 		else if(serp_device->lsr & UART_LSR_OE) {
 			printk(KERN_ALERT "  -K- serp_read there was an Overrun Error, is not sufficiently fast!\n");
+			kfree(kbuff);
 			return -EIO;
 		}
-		/*else {
-			if(++counter > 10000000) {
-				set_current_state(TASK_INTERRUPTIBLE);
-				schedule_timeout(serp_delay);
-				//msleep_interruptible(serp_delay);
+		else {
+			if(++counter > 1000000) {
+				//set_current_state(TASK_INTERRUPTIBLE);
+				//schedule_timeout(serp_delay);
+				msleep_interruptible(serp_delay);
 				++(serp_device->f_idle);
 			}
-		}*/
+		}
 	}
 
+	//Flags END OF FILE!
+	if(cread < cmax-2)
+		serp_device->f_read = 1;
+	else
+		serp_device->f_read = 0;
+
+	serp_device->cread += cread;
 	kbuff[cread] = '\0';
 	if(copy_to_user(buff, kbuff, cread+1) > 0) {
 		printk(KERN_ALERT "\n  -K- serp_read there was a problem copying to user space!\n");
@@ -168,6 +175,7 @@ ssize_t serp_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 	}
 
 	printk(KERN_ALERT "\n    -KR- There was a total of %d chars written to this side!\n", cread);
+	kfree(kbuff);
 
 	return cread;
 }
@@ -193,12 +201,12 @@ ssize_t serp_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 	}
 
 	cwrite = cmax - copy_from_user(kbuff, buff, cmax);
-	kbuff[cwrite] = '\0';
 
 	serp_device->cwrite += cwrite;
 
 	if(cwrite == 0) {
 		serp_device->f_write = 0;
+		kfree(kbuff);
 		return -EFAULT; //No char written, return error
 	}
 	else if(cwrite < cmax)
@@ -207,15 +215,14 @@ ssize_t serp_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 		serp_device->f_write = 0;
 
 	for(ii=0; ii<cwrite; ++ii) {
-		serp_device->thr = kbuff[ii];
-
 		while(!(inb(serp_devices->uart->start + UART_LSR) & UART_LSR_THRE)) {
 			//set_current_state(TASK_INTERRUPTIBLE);
 			//schedule_timeout(serp_delay);
-			msleep_interruptible(50);
+			msleep_interruptible(10);
 		}
 
-		outb((unsigned char)serp_device->thr, serp_device->uart->start + UART_TX);
+		//serp_device->thr = kbuff[ii];
+		outb(kbuff[ii], serp_device->uart->start + UART_TX);
 	}
 
 	kfree(kbuff);
