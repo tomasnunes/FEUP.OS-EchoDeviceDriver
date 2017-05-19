@@ -30,18 +30,18 @@
 #define SERP_NUMBYTES 8
 #define SERP_FREQ     115200
 #define SERP_BITRATE  1200
-#define ADDRESS_COM1  0x3f8
-#define ADDRESS_COM2  0x0 //NOT IN USE
-#define ADDRESS_COM3  0x0 //NOT IN USE
-#define ADDRESS_COM4  0x0 //NOT IN USE
+#define ADDRESS_COM1  0x3F8
+#define ADDRESS_COM2  0x2F8 //NOT IN USE
+#define ADDRESS_COM3  0x3E8 //NOT IN USE
+#define ADDRESS_COM4  0x2E8 //NOT IN USE
 #define MAX_COMS      4
-#define SERP_DELAY    10
+#define SERP_DELAY    1
 
 struct serp_dev {
   struct cdev cdev;
-  int f_write; //Flags error in serp_write
-  int f_read; //Flags error in serp_read
-  int f_idle; //Flags user idle, returns chars read
+  int f_write; //Flags error for next call in serp_write
+  int f_read; //Flags error for next call in serp_read
+  int f_idle; //Flags user idle in read
   ssize_t cwrite; //Counter of written chars
   ssize_t cread; //Counter of read chars
   struct resource *uart;
@@ -49,7 +49,6 @@ struct serp_dev {
   unsigned char dll;
   unsigned char dlm;
   unsigned char lsr;
-  char thr;
 };
 
 extern int serp_minor;

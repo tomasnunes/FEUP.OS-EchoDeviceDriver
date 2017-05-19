@@ -24,12 +24,10 @@ unsigned long coms_address[MAX_COMS] = { ADDRESS_COM1,
 																				 ADDRESS_COM3,
 																				 ADDRESS_COM4 };
 
-//Get number of devices from script
+//(Optional) Get number of devices, freq and bitrate from script
 module_param(serp_numdevs, int, S_IRUGO);
 module_param(serp_freq, long, S_IRUGO);
 module_param(serp_bitrate, long, S_IRUGO);
-//module_param(serp_major, int, S_IRUGO);
-//module_param(serp_minor, int, S_IRUGO);
 
 struct file_operations serp_fops = {
 	.owner 		= THIS_MODULE,
@@ -41,6 +39,7 @@ struct file_operations serp_fops = {
 };
 
 int serp_module_init(void) {
+	//Keep declarations and code separated, ISO C90 forbis it!
 	int ii;
 	dev_t serp_dev = 0;
 
@@ -116,6 +115,13 @@ int serp_open(struct inode *inodeptr, struct file *fileptr) {
 	serp_device->lcr &= ~UART_LCR_DLAB;
 	outb(serp_device->lcr, serp_device->uart->start + UART_LCR);
 
+	//Cleans Receiver
+	serp_device->lsr = inb(serp_device->uart->start + UART_LSR);
+	while(serp_device->lsr & UART_LSR_DR) {
+		inb(serp_device->uart->start + UART_RX);
+		serp_device->lsr = inb(serp_device->uart->start + UART_LSR);
+	}
+
 	printk(KERN_ALERT "  -K- serp_open initialized device with %ld freq | %ld bit-rate | %d dl (dlm-%d  dll-%d)\n", serp_freq, serp_bitrate, dl, serp_device->dlm, serp_device->dll);
 
 	return 0;
@@ -141,27 +147,27 @@ ssize_t serp_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 		serp_device->lsr = inb(serp_device->uart->start + UART_LSR);
 
 		if(serp_device->lsr & UART_LSR_DR) {
+			if(serp_device->lsr & UART_LSR_OE) {
+				printk(KERN_ALERT "  -K- serp_read there was an Overrun Error, is not sufficiently fast!\n");
+				kfree(kbuff);
+				return -EIO;
+			}
 			kbuff[cread++] = inb(serp_device->uart->start + UART_RX);
 			//printk(KERN_ALERT "%c", kbuff[cread-1]);
 			serp_device->f_idle = 0;
 			counter = 0;
 		}
-		else if(serp_device->lsr & UART_LSR_OE) {
-			printk(KERN_ALERT "  -K- serp_read there was an Overrun Error, is not sufficiently fast!\n");
-			kfree(kbuff);
-			return -EIO;
-		}
 		else {
 			if(++counter > 1000000) {
-				//set_current_state(TASK_INTERRUPTIBLE);
-				//schedule_timeout(serp_delay);
-				msleep_interruptible(serp_delay);
+				//msleep_interruptible(serp_delay);
+				set_current_state(TASK_INTERRUPTIBLE);
+				schedule_timeout(serp_delay);
 				++(serp_device->f_idle);
 			}
 		}
 	}
 
-	//Flags END OF FILE!
+	//Flags END OF FILE for next call!
 	if(cread < cmax-2)
 		serp_device->f_read = 1;
 	else
@@ -181,7 +187,6 @@ ssize_t serp_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 }
 
 ssize_t serp_write(struct file *fileptr, const char __user *buff, size_t cmax, loff_t *offptr) {
-	//Keep declarations and code separated, ISO C90 forbis it!
 	int ii;
 	ssize_t cwrite = 0, error = 0;
 	struct serp_dev *serp_device = fileptr->private_data;
@@ -216,12 +221,11 @@ ssize_t serp_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 
 	for(ii=0; ii<cwrite; ++ii) {
 		while(!(inb(serp_devices->uart->start + UART_LSR) & UART_LSR_THRE)) {
-			//set_current_state(TASK_INTERRUPTIBLE);
-			//schedule_timeout(serp_delay);
-			msleep_interruptible(10);
+			//msleep_interruptible(serp_delay);
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(serp_delay);
 		}
 
-		//serp_device->thr = kbuff[ii];
 		outb(kbuff[ii], serp_device->uart->start + UART_TX);
 	}
 
