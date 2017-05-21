@@ -5,12 +5,6 @@
 #ifndef _SERP_H
 #define _SERP_H
 
-#include "serial_reg.h"
-#include <linux/ioport.h>
-#include <asm/io.h>
-#include <linux/sched.h>
-#include <linux/delay.h>
-
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -23,6 +17,12 @@
 #include <linux/fcntl.h>
 #include <linux/errno.h>
 #include <asm/uaccess.h>
+
+#include "serial_reg.h"
+#include <linux/ioport.h>
+#include <asm/io.h>
+#include <linux/sched.h>
+#include <linux/delay.h>
 
 #define SERP_MINOR    0
 #define SERP_MAJOR    0
