@@ -15,40 +15,20 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    int fd = open(argv[1], O_RDWR);
+    int fd = open(argv[1], O_RDWR | O_NONBLOCK);
     if(fd == -1) {
         printf("Error: cannot open file %s\n", argv[1]);
         return -1;
     }
     char *buff = (char *)malloc(MAX_BUFF_SIZE);
+    ssize_t cwrite = 0, cread = 0;
 
-    ssize_t cwrite = 0;
-    /*strcpy(buff, "Hello from the othersiiiiiiide!\n");
-    cwrite = write(fd, buff, strlen(buff));
-    printf("    -T- I send %ld chars to the otherside:\n%s\n", cwrite, buff);
-
-    /*char c = '\0';
-    int ii = 0;
-    while(scanf("%c", c) != EOF) {
-      buff[ii++] = c;
-
-      if(ii == MAX_BUFF_SIZE-1) {
-        cwrite = write(fd, buff, strlen(buff));
-        ii = 0;
-      }
-    }
-
-    if(ii != 0)
-    cwrite = write(fd, buff, strlen(buff));
-    */
-
-    ssize_t cread = 0;
     cread = read(fd, buff, MAX_BUFF_SIZE);
 
     if(cread > 0)
       printf("    -T- I got %ld chars from the otherside:\n-> %s\n\n", cread, buff);
     else
-      printf("    -T- There was an error reading!\n");
+      printf("    -T- As expected it returned immediately without waiting!\n");
 
     printf("    -T- echo_write returned: %ld\n    -T- echo_read returned: %ld\n", cwrite, cread);
 

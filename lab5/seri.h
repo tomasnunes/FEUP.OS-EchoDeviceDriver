@@ -77,9 +77,9 @@ struct seri_dev_t {
   size_t cmax;
   char *tbuff;
   spinlock_t lread, lwrite; //Read and Write spinlocks for kfifos
-  struct kfifo *kfread, *kfwrite; //Read and Write kfifos
-  wait_queue_head_t qread, qwrite; //Read and Write Wait Queues
-  struct semaphore sread, swrite; //Read and Write Wait Semaphores
+  struct kfifo *kfread, *kfwrite;
+  wait_queue_head_t qread, qwrite;
+  struct semaphore sread, swrite/*, spoll*/;
   atomic_t s_available; //Prevent more than one user
 };
 
@@ -98,5 +98,6 @@ ssize_t seri_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 ssize_t seri_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *offptr);
 irqreturn_t seri_interrupt(int irq, void *dev_id);
 int seri_ioctl(struct inode *inodeptr, struct file *fileptr, unsigned int cmd, unsigned long arg);
+//unsigned int seri_poll(struct file *fileptr, poll_table *wait);
 
 #endif

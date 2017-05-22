@@ -1,0 +1,5 @@
+We have implemented a poll-based device driver with all the features enumerated in Lab 3.
+Furthermore, we have implemented 6 of the enhancements described in Lab5. It's missing the last 2 enhancements.
+The DD is prepared to work with multiple devices, each to work with a different COM of the VM.
+We have also added the possibility of passing parameters like bit-rate, number of devices, among others, through arguments of the load script.
+Example: $ sudo ./load.sh $name serp_numdevs="$value" serp_bitrate="$value"

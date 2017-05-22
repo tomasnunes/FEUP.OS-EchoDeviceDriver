@@ -114,13 +114,6 @@ int serp_open(struct inode *inodeptr, struct file *fileptr) {
 	serp_device->lcr &= ~UART_LCR_DLAB;
 	outb(serp_device->lcr, serp_device->uart->start + UART_LCR);
 
-	//Cleans Receiver
-	/*serp_device->lsr = inb(serp_device->uart->start + UART_LSR);
-	while(serp_device->lsr & UART_LSR_DR) {
-		inb(serp_device->uart->start + UART_RX);
-		serp_device->lsr = inb(serp_device->uart->start + UART_LSR);
-	}*/
-
 	printk(KERN_ALERT "  -K- serp_open initialized device with %ld freq | %ld bit-rate | %d dl (dlm-%d  dll-%d)\n", serp_freq, serp_bitrate, dl, serp_device->dlm, serp_device->dll);
 
 	return 0;

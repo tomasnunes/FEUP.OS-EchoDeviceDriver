@@ -1,0 +1,2 @@
+In order to test this enhancement just run the enhancement3_4.sh script.
+As expected with the flags given all bits are 1 except for the most significant that is 0, the DLAB, and the dl changed to 48, 115200/2400.

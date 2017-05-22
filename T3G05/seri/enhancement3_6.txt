@@ -1,0 +1,4 @@
+In order to test this enhancement run the enhancement3_6.sh script.
+Then open another session with Alt+F2.
+In the new session run ./test /dev/seri.
+As expected the device cannot be open!

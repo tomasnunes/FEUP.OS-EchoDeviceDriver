@@ -27,7 +27,6 @@ unsigned long coms_address[MAX_COMS] = { ADDRESS_COM1,
 
 //(Optional) Get number of devices, freq and bitrate from script
 module_param(seri_numdevs, int, S_IRUGO);
-module_param(seri_freq, long, S_IRUGO);
 module_param(seri_bitrate, long, S_IRUGO);
 module_param(seri_irq, int, S_IRUGO);
 
@@ -38,6 +37,7 @@ struct file_operations seri_fops = {
 	.write 		= seri_write,
 	.llseek 	= no_llseek,
 	.ioctl		= seri_ioctl,
+	//.poll			= seri_poll,
 	.release	= seri_release
 };
 
@@ -71,6 +71,7 @@ int seri_module_init(void) {
 		spin_lock_init(&seri_devices[ii].lwrite);
 		init_MUTEX(&seri_devices[ii].sread);
 		init_MUTEX(&seri_devices[ii].swrite);
+		//init_MUTEX(&seri_devices[ii].spoll);
 		atomic_set(&seri_devices[ii].s_available, 1);
 
 		if(cdev_add(&(seri_devices[ii].cdev), seri_dev, 1))
@@ -142,17 +143,10 @@ int seri_open(struct inode *inodeptr, struct file *fileptr) {
 	seri_device->ier |= UART_IER_THRI | UART_IER_RDI | UART_IER_RLSI;
 	outb(seri_device->ier, seri_device->uart->start + UART_IER);
 
-	//Cleans Receiver
-	/*seri_device->lsr = inb(seri_device->uart->start + UART_LSR);
-	while(seri_device->lsr & UART_LSR_DR) {
-		inb(seri_device->uart->start + UART_RX);
-		seri_device->lsr = inb(seri_device->uart->start + UART_LSR);
-	}*/
-
 	if(request_irq(seri_irq, seri_interrupt, SA_SHIRQ | SA_INTERRUPT, name, seri_device))
 		printk(KERN_ALERT "Failed request_irq can't be assigned IRQ %d... :(", seri_irq);
 
-	printk(KERN_ALERT "  -K- seri_open initialized device with %ld freq | %ld bit-rate | %d dl (dlm-%d  dll-%d)\n", seri_freq, seri_bitrate, dl, seri_device->dlm, seri_device->dll);
+	printk(KERN_ALERT "  -K- seri_open initialized device with:\n      %ld freq | %ld bit-rate | %d dl (dlm-%d  dll-%d)\n", seri_freq, seri_bitrate, dl, seri_device->dlm, seri_device->dll);
 
 	return 0;
 }
@@ -163,7 +157,7 @@ ssize_t seri_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 	int length, result;
 	ssize_t cread = 0;
 
-	printk(KERN_ALERT "  -K- seri_read was invoked!\n");
+	//printk(KERN_ALERT "  -K- seri_read was invoked!\n");
 
 	//If O_NONBLOCK flag is set and there's nothing to read return immediately!
 	if((fileptr->f_flags & O_NONBLOCK) && (seri_device->kfread->in == seri_device->kfread->out))
@@ -297,6 +291,34 @@ ssize_t seri_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 		}
 	}
 
+	/*while(cleft > 0) {
+		if(cleft > seri_device->kfwrite->size - (seri_device->kfwrite->in - seri_device->kfwrite->out))
+			cwrite = seri_device->kfwrite->size - (seri_device->kfwrite->in - seri_device->kfwrite->out);
+		else
+			cwrite = cleft;
+
+		cleft -= cwrite;
+
+		printk(KERN_ALERT "  -K- seri_write cwrite = %d | tbuff = %X", cwrite, tbuff);
+		if(kfifo_put(seri_device->kfwrite, tbuff+offset, cwrite) < cwrite) {
+			printk(KERN_ALERT "  -K- seri_write fail on copy to kfwrite!\n");
+			kfree(tbuff);
+			return -1;
+		}
+		offset += cwrite;
+
+		if(f_first && (inb(seri_device->uart->start + UART_LSR) & UART_LSR_THRE)) {
+			f_first = 0;
+			if(kfifo_get(seri_device->kfwrite, &tchar, 1) < 1) {
+				printk(KERN_ALERT "  -K- seri_write fail on getting from kfwrite!\n");
+				kfree(tbuff);
+				return -1;
+			}
+
+			outb(tchar, seri_device->uart->start + UART_TX);
+		}
+	}*/
+
 	kfree(tbuff);
 	//printk(KERN_ALERT "  -K- seri_write ended, buffer has been send to the otherside!\n");
 
@@ -305,7 +327,8 @@ ssize_t seri_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 
 int seri_ioctl(struct inode *inodeptr, struct file *fileptr, unsigned int cmd, unsigned long arg) {
 	struct seri_dev_t *seri_device = fileptr->private_data;
-	int dl;
+	int dl, ii;
+	unsigned char lcr;
 	seri_device->lcr = 0;
 
 	if((cmd & IOCTL_WL6) && (cmd & IOCTL_WL7))
@@ -342,8 +365,39 @@ int seri_ioctl(struct inode *inodeptr, struct file *fileptr, unsigned int cmd, u
 
 	outb(seri_device->lcr, seri_device->uart->start + UART_LCR);
 
+	lcr = seri_device->lcr;
+	printk(KERN_ALERT "\n  -K- serp_ioctl changed parameters were changed!\n      LCR: ");
+	for(ii=0; ii<8; ++ii){
+    //print last bit and shift left.
+		if(lcr & 0x80)
+			printk(KERN_ALERT "%u", 1);
+		else
+			printk(KERN_ALERT "%u", 0);
+    lcr = lcr<<1;
+	}
+	printk(KERN_ALERT "\n      DLM: %d | DLM: %d\n\n", seri_device->dlm, seri_device->dll);
+
 	return 0;
 }
+
+/*unsigned int seri_poll(struct file *fileptr, poll_table *wait) {
+	struct seri_dev_t *seri_device = fileptr->private_data;
+	unsigned int mask = 0;
+
+	 down(&seri_device->spoll);
+
+	 poll_wait(fileptr, &seri_device->inq, wait);
+	 poll_wait(fileptr, &seri_device->outq, wait);
+
+	 if(seri_device->rp != dev->wp)
+	 	mask |= POLLIN | POLLRDNORM;
+	 if(spacefree(seri_device))
+	 	mask |= POLLOUT | POLLWRNORM;
+
+	 up(&seri_device->spoll);
+
+	 return mask;
+}*/
 
 int seri_release(struct inode *inodeptr, struct file *fileptr) {
 	struct seri_dev_t *seri_device = fileptr->private_data;
@@ -387,8 +441,8 @@ irqreturn_t seri_interrupt(int irq, void *dev_id) {
 	seri_device->iir = inb(seri_device->uart->start + UART_IIR);
 
 	if(seri_device->iir & UART_IIR_RDI) {
-		//seri_device->lsr = inb(seri_device->uart->start + UART_LSR);
-		/*if(seri_device->iir & UART_IIR_RLSI) {
+		/*seri_device->lsr = inb(seri_device->uart->start + UART_LSR);
+		if(seri_device->iir & UART_IIR_RLSI) {
 			if(seri_device->lsr & UART_LSR_OE) {
 				printk(KERN_ALERT "  -K- seri_interrupt there was an Overrun Error, is not sufficiently fast!\n");
 				seri_device->f_read = -EIO;

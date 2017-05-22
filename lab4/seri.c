@@ -27,7 +27,6 @@ unsigned long coms_address[MAX_COMS] = { ADDRESS_COM1,
 
 //(Optional) Get number of devices, freq and bitrate from script
 module_param(seri_numdevs, int, S_IRUGO);
-module_param(seri_freq, long, S_IRUGO);
 module_param(seri_bitrate, long, S_IRUGO);
 module_param(seri_irq, int, S_IRUGO);
 

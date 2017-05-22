@@ -1,0 +1,2 @@
+In order to test this enhancement just run the enhancement3_5.sh script.
+As expected when Ctrl+C is pressed the program ends!
