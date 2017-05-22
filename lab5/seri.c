@@ -172,13 +172,15 @@ ssize_t seri_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 	do {
 		result = wait_event_interruptible_timeout(seri_device->qread, (seri_device->kfread->in != seri_device->kfread->out), seri_delay);
 		length = seri_device->kfread->in - seri_device->kfread->out;
-		if(length > cmax-cread)
+		if(length > cmax - cread)
 			length = cmax - cread;
 		//printk(KERN_ALERT "\n  -K- seri_read length = %d! | result = %d\n", length, result);
 
-		if(result == -ERESTARTSYS)
+		if(result == -ERESTARTSYS) {
+			kfree(tbuff);
 			return -ERESTARTSYS;
-		else if(!result && seri_device->cread) {
+		}
+		else if(!result && cread) {
 			seri_device->f_read = 1;
 			break;
 		}
@@ -208,8 +210,9 @@ ssize_t seri_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 	struct seri_dev_t *seri_device = fileptr->private_data;
 	ssize_t cwrite = 0, error = 0, cleft = 0;
 	char tchar, *tbuff;
-	int f_first = 1; //Flags first cycle
-
+	int result, offset = 0;
+	int f_first = 1;
+	
 	//printk(KERN_ALERT "  -K- seri_write was invoked!\n");
 	if(seri_device->f_write) {
 		error = seri_device->f_write;
@@ -233,18 +236,21 @@ ssize_t seri_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 	else if(cleft < cmax)
 		seri_device->f_write = -EFAULT; //Flags error to return on next call
 
-	while(cleft > 0) {
+	/*while(cleft > 0) {
 		if(cleft > seri_device->kfwrite->size - (seri_device->kfwrite->in - seri_device->kfwrite->out))
 			cwrite = seri_device->kfwrite->size - (seri_device->kfwrite->in - seri_device->kfwrite->out);
 		else
 			cwrite = cleft;
 
 		cleft -= cwrite;
-		if(kfifo_put(seri_device->kfwrite, tbuff, cwrite) < cwrite) {
+
+		printk(KERN_ALERT "  -K- seri_write cwrite = %d | tbuff = %X", cwrite, tbuff);
+		if(kfifo_put(seri_device->kfwrite, tbuff+offset, cwrite) < cwrite) {
 			printk(KERN_ALERT "  -K- seri_write fail on copy to kfwrite!\n");
 			kfree(tbuff);
 			return -1;
 		}
+		offset += cwrite;
 
 		if(f_first && (inb(seri_device->uart->start + UART_LSR) & UART_LSR_THRE)) {
 			f_first = 0;
@@ -256,17 +262,49 @@ ssize_t seri_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 
 			outb(tchar, seri_device->uart->start + UART_TX);
 		}
+	}*/
+
+	while(cleft > 0) {
+		if(seri_device->kfwrite->in == seri_device->kfwrite->out) {
+			if(cleft > seri_device->kfwrite->size)
+				cwrite = seri_device->kfwrite->size;
+			else
+				cwrite = cleft;
+
+			cleft -= cwrite;
+			if(kfifo_put(seri_device->kfwrite, tbuff+offset, cwrite) < cwrite) {
+				printk(KERN_ALERT "  -K- seri_write fail on copy to kfwrite!\n");
+				kfree(tbuff);
+				return -1;
+			}
+			offset += cwrite;
+
+			if((inb(seri_device->uart->start + UART_LSR) & UART_LSR_THRE)) {
+				if(kfifo_get(seri_device->kfwrite, &tchar, 1) < 1) {
+					printk(KERN_ALERT "  -K- seri_write fail on getting from kfwrite!\n");
+					kfree(tbuff);
+					return -1;
+				}
+
+				outb(tchar, seri_device->uart->start + UART_TX);
+			}
+		}
+
+		result = wait_event_interruptible_timeout(seri_device->qwrite, (seri_device->kfwrite->in == seri_device->kfwrite->out), seri_delay);
+		if(result == -ERESTARTSYS) {
+			kfree(tbuff);
+			return -ERESTARTSYS;
+		}
 	}
 
 	kfree(tbuff);
 	//printk(KERN_ALERT "  -K- seri_write ended, buffer has been send to the otherside!\n");
 
-	return cwrite;
+	return cmax;
 }
 
 int seri_release(struct inode *inodeptr, struct file *fileptr) {
 	struct seri_dev_t *seri_device = fileptr->private_data;
-	printk(KERN_ALERT "  -K- seri_release was invoked!\n\n    -K- There was a total number of %d chars read and\n        a total of %d chars written to the otherside!!\n", seri_eri_device = fileptr->private_data;
 	printk(KERN_ALERT "  -K- seri_release was invoked!\n\n    -K- There was a total number of %d chars read and\n        a total of %d chars written to the otherside!!\n", seri_device->cread, seri_device->cwrite);
 
 	kfifo_free(seri_device->kfread);
@@ -276,221 +314,6 @@ int seri_release(struct inode *inodeptr, struct file *fileptr) {
 }
 
 void seri_module_exit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
-
-	if(seri_devices) {
-		for(ii=0; ii<seri_numdevs; ++ii) {
-			printk(KERN_NOTICE "  - Goodbye port 0x%X-0x%X\n", seri_devices[ii].uart->start, seri_devices[ii].uart->end);
-			cdev_del(&(seri_devices[ii].cdev));
-	    release_region(coms_address[ii], seri_numports);
-			free_irq(seri_irq, &seri_devices[ii]);
-		}
-
-		kfree(seri_devices);
-		seri_devices = NULL;
-	}
-
-	//flush_scheduled_work();
-	printk(KERN_NOTICE "\n!Goodbye, my fellow device %d!\n\n", seri_major);
-	unregister_chrdev_region(seri_dev, seri_numdevs);
-
-	return;
-}
-
-irqreturn_t seri_interrupt(int irq, void *dev_id) {
-	struct seri_dev_t *seri_deveeri_device = fileperi_device = fileptr->private_data;
-	printk(KERN_ALERT "  -K- seri_release was invoked!\n\n    -K- There was a total number of %d chars read and\n        a total of %d chars written to the otherside!!\n", seri_device->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(seri_device->kfwrite);
-
-	return 0;
-}
-
-void seri_module_exit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
-
-	if(seri_devices) {
-		for(ii=0; ii<seri_numdevs; ++ii) {
-			printk(KERN_NOTICE "  - Goodbye port 0x%X-0x%X\n", seri_devices[ii].uart->start, seri_devices[ii].uart->end);
-			cdev_del(&(seri_devices[ii].cdev));
-	    release_region(coms_address[ii], seri_numports);
-			free_irq(seri_irq, &seri_devices[ii]);
-		}
-
-		kfree(seri_devices);
-		seri_devices = NULL;
-	}
-
-	//flush_scheduled_work();
-	printk(KERN_NOTICE "\n!Goodbye, my fellow device %d!\n\n", seri_major);
-	unregister_chrdev_region(seri_dev, seri_nuereri_deeeri_device = fileptr->private_data;
-	printk(KERN_ALERT "  -K- seri_release was invoked!\n\n    -K- There was a total number of %d chars read and\n        a total of %d chars written to the otherside!!\n", seri_device->cread, seri_device->cwrite);
-
-ereri_device = fileptr->private_data;
-	printkeri_device = fileerieri_device = fileptr->private_data;
-	printk(KERN_ALERT "  -K- seri_release was invoked!\n\n    -K- There was a total number of %d chars read and\n        a total of %d chars written to the otherside!!\n", seri_device->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(seri_device->kfwrite);
-
-	return 0;
-}
-
-void seri_module_exit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
-
-	if(seri_devices) {
-		for(ii=0; ii<seri_numdevs; ++ii) {
-			printk(KERN_NOTICE "  - Goodbye port 0x%X-0x%X\n", seererieri_device = ferieri_eri_device = fileptr->private_data;
-	printk(KERN_ALERT "  -K- seri_release was invoked!\n\n    -K- There was a total number of %d chars read and\n        a total of %d chars written to the otherside!!\n", seri_device->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(seri_device->kfwrite);
-
-	return 0;
-}
-
-void seri_module_exit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
-
-	iiice->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(seri_device->kfwrite);
-
-	return 0;
-}
-
-void seri_module_exit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
-
-	if(seri_devices) {
-		for(ii=0; ii<ice->creaice->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(siceice->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(seri_device->kfwrite);
-
-	return 0;
-}
-
-void seri_module_exit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
-
-	if(seri_devices) {
-		for(ii=0; ii<seri_numdevs; ++ii) {
-			printk(KERN_NOTICE "  - Goodbye pice->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(seri_device->kfwrite);
-
-	return 0;
-}
-
-void seri_module_exit(void) ice->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(seri_device->kfwrite);
-
-	return 0;
-}
-
-void seri_module_exit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
-
-	if(seri_devices) {
-		for(ii=0; ii<seri_numdevs; ++ii) {
-			printk(KERN_NOTICE "  - Goodbye pice->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(seri_device->kfwrite);
-
-	return 0;
-}
-
-void seri_module_exit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
-
-	if(seri_devices) {
-		for(ii=0; ii<seri_numdevs; ++ii) {
-			printk(KERN_NOTICE "  - Goodbye port 0x%X-0x%X\n", seri_devices[ii].uart->start, seri_devices[ii].uart->end);
-			cdev_del(&(seri_devices[ii].cdev));
-	    release_region(coms_address[ii], seri_nuice->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(seri_device->kfwrite);
-
-	return 0;
-}
-
-void seri_module_exit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
-
-	if(seri_devices) {
-		for(ii=0; ii<seri_numdevs; ++ii) {
-			printk(KERN_NOTICE "  - Goodbye port 0x%X-0x%X\n", seri_devices[ii].uart->start, seri_devices[ii].uart->end);
-			cdev_del(&(seri_devices[ii].cdev));
-	    release_region(coms_address[ii], seri_numports);
-			free_irq(seri_irq, &seri_devices[ii]);
-		}
-
-		kfree(seri_devices);
-		seri_devices = NULL;
-	}
-
-	//flush_scheduled_work();
-	printk(KERN_NOTICE "\n!Goodbye, my fellow device %d!\n\n", seri_major);
-	unregister_chrdev_region(seri_dev, seri_numdevs);
-
-	return;
-}
-
-irqreturn_t serice->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(seri_device->kfwrite);
-
-	return 0;
-}
-
-void seri_module_exit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
-
-	if(seri_devices) {
-		for(ii=0; ii<seri_numdevs; ++ii) {
-			printk(KERN_NOTICE "  - Goodbye port 0x%X-0x%X\n",ice-ice->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(seriice->creadice->cread, seri_device->cwrite);
-
-	kfifo_free(seri_device->kfread);
-	kfifo_free(seri_device->kfwrite);
-
-	return 0;
-}
-
-void seri_module_exit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
-
-	if(seri_devices) {
-		for(ii=0; ii<seri_numdevs; ++ii) {
-			printk(KERN_NOTICE "  - Goodbye port 0x%X-0x%X\n", seri_devices[ii].uart->start, seri_devices[ii].uart->end);
-			cdev_del(&(seri_devices[ii].cdev));
-	    release_rexxit(void) {
 	int ii;
 	dev_t seri_dev = MKDEV(seri_major, seri_minor);
 
@@ -517,39 +340,69 @@ irqreturn_t seri_interrupt(int irq, void *dev_id) {
 	struct seri_dev_t *seri_device = (struct seri_dev_t *)dev_id;
 	char tchar;
 
-	//xitxit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
+	//printk(KERN_ALERT "  -K- seri_interrupt was invoked!\n"); //Slows down the program..
 
-	if(seri_devices) {
-		for(ii=0; ii<seri_numdevs; ++ii) {
-			printk(KERN_NOTICE "  - Goodbye port 0x%X-0x%X\n", seri_devices[ii].uart->start, seri_devices[ii].uart->end);
-			cdev_del(&(seri_devices[ii].cdev));
-	    release_region(coms_axit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
+	seri_device->lsr = inb(seri_device->uart->start + UART_LSR);
+	seri_device->iir = inb(seri_device->uart->start + UART_IIR);
 
-	if(seri_devices) {
-		for(ii=0; ii<seri_numdevs; ++ii) {
-			printk(KERN_NOTICE "  - Goodbye port 0x%X-0x%X\n", seri_devices[ii].uart->start, seri_devices[ii].uart->end);
-			cdev_del(&(seri_devices[ii].cdev));
-	    release_region(coms_address[ii], seri_numports);
-			free_irq(seri_irq, &seri_devices[ii]);
+	if(seri_device->iir & UART_IIR_RDI) {
+		tchar = inb(seri_device->uart->start + UART_RX);
+		if(kfifo_put(seri_device->kfread, &tchar, 1) < 1) {
+			printk(KERN_ALERT "  -K- seri_interrupt kfread is full!\n");
 		}
 
-		kfree(seri_devices);
-		seri_devices = NULL;
+		wake_up_interruptible(&seri_device->qread); //Awake reading process
+		return IRQ_HANDLED;
+
+		/*Handle ERRORS!!
+		if(seri_device->iir & UART_IIR_RLSI) {
+		if(seri_device->lsr & UART_LSR_OE)
+		printk(KERN_ALERT "  -K- seri_interrupt there was an Overrun Error, is not sufficiently fast!\n");
+		else if(seri_device->lsr & UART_LSR_PE)
+		printk(KERN_ALERT "  -K- seri_interrupt there was a Parity Error!\n");
+		else if(seri_device->lsr & UART_LSR_FE)
+		printk(KERN_ALERT "  -K- seri_interrupt there was a Frame Error!\n");
+		return IRQ_HANDLED;// or -EIO;!!!
+	}*/
+
+
+
+		/*seri_device->iir = inb(seri_device->uart->start + UART_IIR);
+		seri_device->lsr = inb(seri_device->uart->start + UART_LSR);
+	} while((seri_device->iir & UART_IIR_RDI) && (seri_device->cread < seri_device->cmax));*/
+
+
+		/*seri_device->kbuff = kzalloc(seri_device->cmax, GFP_KERNEL);
+		if(!seri_device->kbuff) {
+			printk(KERN_ALERT "  -K- seri_interrupt could NOT alloc memory for fifo buffer!\n");
+			irqreturn = -IRQ_HANDLED;// or -NOMEM;!!!
+		}*/
+
+		/***if(__kfifo_put(seri_device->kfifo, tbuff, seri_device->cread) < seri_device->cread) {
+			printk(KERN_ALERT "  -K- seri_interrupt error copying from tmp buffer to fifo buffer!\n");
+			//kfree(seri_device->kbuff);
+			irqreturn = -IRQ_HANDLED;// or -NOMEM;!!!
+		}
+		else {
+			kfree(tbuff);
+			wake_up_interruptible(&seri_device->qread); //Awake reading process
+			return IRQ_HANDLED;
+		}***/
+	}
+	else if(seri_device->iir & UART_IIR_THRI) {
+		if(kfifo_get(seri_device->kfwrite, &tchar, 1) < 1) {
+			wake_up_interruptible(&seri_device->qwrite); //Awake write process
+			printk(KERN_ALERT "  -K- seri_interrupt kfwrite is empty!\n");
+			return IRQ_HANDLED;
+		}
+
+		outb(tchar, seri_device->uart->start + UART_TX);
+
+		return IRQ_HANDLED;
 	}
 
-	//flush_scheduled_work();
-	printk(KERN_NOTICE "\n!Goodbye, my fellow device %d!\n\xixit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
+	return IRQ_NONE;
+}
 
-	ixitxit(void) {
-	int ii;
-	dev_t seri_dev = MKDEV(seri_major, seri_minor);
-
-	if(seri_devices) {
-		for(ii=0; ii<seri_numdevs; ++ii) {
-			printk(KERN_NOTICE "  - G
+module_init(seri_module_init);
+module_exit(seri_module_exit);

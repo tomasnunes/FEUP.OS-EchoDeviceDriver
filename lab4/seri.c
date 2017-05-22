@@ -68,7 +68,6 @@ int seri_module_init(void) {
 
 		spin_lock_init(&seri_devices[ii].lread);
 		spin_lock_init(&seri_devices[ii].lwrite);
-		//init_MUTEX(seri_devices[ii].sem); //Initialize Semaphore
 
 		if(cdev_add(&(seri_devices[ii].cdev), seri_dev, 1))
 			printk(KERN_ALERT "Failed cdev_add on %d device... :(", ii);
@@ -155,13 +154,13 @@ ssize_t seri_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 	int length, result;
 	ssize_t cread = 0;
 
+	//printk(KERN_ALERT "  -K- seri_read was invoked!\n");
+
 	//If file as ended, return immediately
 	if(seri_device->f_read) {
 		seri_device->f_read = 0;
 		return 0;
 	}
-
-	//printk(KERN_ALERT "  -K- seri_read was invoked!\n");
 
 	tbuff = kzalloc(cmax, GFP_KERNEL);
 	if(!tbuff) {
@@ -174,6 +173,7 @@ ssize_t seri_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 		length = seri_device->kfread->in - seri_device->kfread->out;
 		if(length > cmax - cread)
 			length = cmax - cread;
+
 		//printk(KERN_ALERT "\n  -K- seri_read length = %d! | result = %d\n", length, result);
 
 		if(result == -ERESTARTSYS) {
@@ -199,9 +199,9 @@ ssize_t seri_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 		kfree(tbuff);
 		return -1;
 	}
-	kfree(tbuff);
-	//printk(KERN_ALERT "\n    -KR- There was a total of %d chars written to this side!\n", seri_device->cread);
 
+	//printk(KERN_ALERT "\n    -KR- There was a total of %d chars written to this side!\n", seri_device->cread);
+	kfree(tbuff);
 	seri_device->cread += cread;
 	return cread;
 }
@@ -210,9 +210,10 @@ ssize_t seri_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 	struct seri_dev_t *seri_device = fileptr->private_data;
 	ssize_t cwrite = 0, error = 0, cleft = 0;
 	char tchar, *tbuff;
-	int f_first = 1; //Flags first cycle
+	int result, offset = 0;
 
 	//printk(KERN_ALERT "  -K- seri_write was invoked!\n");
+
 	if(seri_device->f_write) {
 		error = seri_device->f_write;
 		seri_device->f_write = 0;
@@ -236,34 +237,42 @@ ssize_t seri_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 		seri_device->f_write = -EFAULT; //Flags error to return on next call
 
 	while(cleft > 0) {
-		if(cleft > seri_device->kfwrite->size - (seri_device->kfwrite->in - seri_device->kfwrite->out))
-			cwrite = seri_device->kfwrite->size - (seri_device->kfwrite->in - seri_device->kfwrite->out);
-		else
-			cwrite = cleft;
+		if(seri_device->kfwrite->in == seri_device->kfwrite->out) {
+			if(cleft > seri_device->kfwrite->size)
+				cwrite = seri_device->kfwrite->size;
+			else
+				cwrite = cleft;
 
-		cleft -= cwrite;
-		if(kfifo_put(seri_device->kfwrite, tbuff, cwrite) < cwrite) {
-			printk(KERN_ALERT "  -K- seri_write fail on copy to kfwrite!\n");
-			kfree(tbuff);
-			return -1;
-		}
-
-		if(f_first && (inb(seri_device->uart->start + UART_LSR) & UART_LSR_THRE)) {
-			f_first = 0;
-			if(kfifo_get(seri_device->kfwrite, &tchar, 1) < 1) {
-				printk(KERN_ALERT "  -K- seri_write fail on getting from kfwrite!\n");
+			cleft -= cwrite;
+			if(kfifo_put(seri_device->kfwrite, tbuff+offset, cwrite) < cwrite) {
+				printk(KERN_ALERT "  -K- seri_write fail on copy to kfwrite!\n");
 				kfree(tbuff);
 				return -1;
 			}
+			offset += cwrite;
 
-			outb(tchar, seri_device->uart->start + UART_TX);
+			if((inb(seri_device->uart->start + UART_LSR) & UART_LSR_THRE)) {
+				if(kfifo_get(seri_device->kfwrite, &tchar, 1) < 1) {
+					printk(KERN_ALERT "  -K- seri_write fail on getting from kfwrite!\n");
+					kfree(tbuff);
+					return -1;
+				}
+
+				outb(tchar, seri_device->uart->start + UART_TX);
+			}
+		}
+
+		result = wait_event_interruptible_timeout(seri_device->qwrite, (seri_device->kfwrite->in == seri_device->kfwrite->out), seri_delay);
+		if(result == -ERESTARTSYS) {
+			kfree(tbuff);
+			return -ERESTARTSYS;
 		}
 	}
 
 	kfree(tbuff);
 	//printk(KERN_ALERT "  -K- seri_write ended, buffer has been send to the otherside!\n");
 
-	return cwrite;
+	return cmax;
 }
 
 int seri_release(struct inode *inodeptr, struct file *fileptr) {
@@ -292,7 +301,6 @@ void seri_module_exit(void) {
 		seri_devices = NULL;
 	}
 
-	//flush_scheduled_work();
 	printk(KERN_NOTICE "\n!Goodbye, my fellow device %d!\n\n", seri_major);
 	unregister_chrdev_region(seri_dev, seri_numdevs);
 
@@ -314,47 +322,13 @@ irqreturn_t seri_interrupt(int irq, void *dev_id) {
 			printk(KERN_ALERT "  -K- seri_interrupt kfread is full!\n");
 		}
 
-		wake_up_interruptible(&seri_device->qread); //Awake reading process
+		wake_up_interruptible(&seri_device->qread); //Awake read function
 		return IRQ_HANDLED;
-
-		/*Handle ERRORS!!
-		if(seri_device->iir & UART_IIR_RLSI) {
-		if(seri_device->lsr & UART_LSR_OE)
-		printk(KERN_ALERT "  -K- seri_interrupt there was an Overrun Error, is not sufficiently fast!\n");
-		else if(seri_device->lsr & UART_LSR_PE)
-		printk(KERN_ALERT "  -K- seri_interrupt there was a Parity Error!\n");
-		else if(seri_device->lsr & UART_LSR_FE)
-		printk(KERN_ALERT "  -K- seri_interrupt there was a Frame Error!\n");
-		return IRQ_HANDLED;// or -EIO;!!!
-	}*/
-
-
-
-		/*seri_device->iir = inb(seri_device->uart->start + UART_IIR);
-		seri_device->lsr = inb(seri_device->uart->start + UART_LSR);
-	} while((seri_device->iir & UART_IIR_RDI) && (seri_device->cread < seri_device->cmax));*/
-
-
-		/*seri_device->kbuff = kzalloc(seri_device->cmax, GFP_KERNEL);
-		if(!seri_device->kbuff) {
-			printk(KERN_ALERT "  -K- seri_interrupt could NOT alloc memory for fifo buffer!\n");
-			irqreturn = -IRQ_HANDLED;// or -NOMEM;!!!
-		}*/
-
-		/***if(__kfifo_put(seri_device->kfifo, tbuff, seri_device->cread) < seri_device->cread) {
-			printk(KERN_ALERT "  -K- seri_interrupt error copying from tmp buffer to fifo buffer!\n");
-			//kfree(seri_device->kbuff);
-			irqreturn = -IRQ_HANDLED;// or -NOMEM;!!!
-		}
-		else {
-			kfree(tbuff);
-			wake_up_interruptible(&seri_device->qread); //Awake reading process
-			return IRQ_HANDLED;
-		}***/
 	}
 	else if(seri_device->iir & UART_IIR_THRI) {
 		if(kfifo_get(seri_device->kfwrite, &tchar, 1) < 1) {
-			printk(KERN_ALERT "  -K- seri_interrupt kfwrite is empty!\n");
+			//printk(KERN_ALERT "  -K- seri_interrupt kfwrite is empty!\n");
+			wake_up_interruptible(&seri_device->qwrite); //Awake write function
 			return IRQ_HANDLED;
 		}
 
