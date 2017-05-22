@@ -37,6 +37,7 @@ struct file_operations seri_fops = {
 	.read 		= seri_read,
 	.write 		= seri_write,
 	.llseek 	= no_llseek,
+	.ioctl		= seri_ioctl,
 	.release	= seri_release
 };
 
@@ -70,6 +71,7 @@ int seri_module_init(void) {
 		spin_lock_init(&seri_devices[ii].lwrite);
 		init_MUTEX(&seri_devices[ii].sread);
 		init_MUTEX(&seri_devices[ii].swrite);
+		atomic_set(&seri_devices[ii].s_available, 1);
 
 		if(cdev_add(&(seri_devices[ii].cdev), seri_dev, 1))
 			printk(KERN_ALERT "Failed cdev_add on %d device... :(", ii);
@@ -95,6 +97,11 @@ int seri_open(struct inode *inodeptr, struct file *fileptr) {
 
 	seri_device = container_of(inodeptr->i_cdev, struct seri_dev_t, cdev);
 	fileptr->private_data = seri_device;
+
+	if(!atomic_dec_and_test(&seri_device->s_available)) {
+	 atomic_inc(&seri_device->s_available);
+	 return -EBUSY; //Already open
+	}
 
 	seri_device->kfread = kfifo_alloc(MAX_FIFO_BUFF, GFP_KERNEL, &seri_device->lread);
 	seri_device->kfwrite = kfifo_alloc(MAX_FIFO_BUFF, GFP_KERNEL, &seri_device->lwrite);
@@ -157,6 +164,10 @@ ssize_t seri_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *
 	ssize_t cread = 0;
 
 	printk(KERN_ALERT "  -K- seri_read was invoked!\n");
+
+	//If O_NONBLOCK flag is set and there's nothing to read return immediately!
+	if((fileptr->f_flags & O_NONBLOCK) && (seri_device->kfread->in == seri_device->kfread->out))
+		return -EAGAIN;
 
 	//If file as ended, return immediately
 	if(seri_device->f_read) {
@@ -223,6 +234,10 @@ ssize_t seri_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 
 	//printk(KERN_ALERT "  -K- seri_write was invoked!\n");
 
+	//If O_NONBLOCK flag is set and there's nothing to read return immediately!
+	if((fileptr->f_flags & O_NONBLOCK) && (seri_device->kfwrite->size-(seri_device->kfwrite->in-seri_device->kfwrite->out) == 0))
+		return -EAGAIN;
+
 	down_interruptible(&seri_device->swrite); //Lock Semaphore
 	if(seri_device->f_write) {
 		error = seri_device->f_write;
@@ -288,12 +303,55 @@ ssize_t seri_write(struct file *fileptr, const char __user *buff, size_t cmax, l
 	return cmax;
 }
 
+int seri_ioctl(struct inode *inodeptr, struct file *fileptr, unsigned int cmd, unsigned long arg) {
+	struct seri_dev_t *seri_device = fileptr->private_data;
+	int dl;
+	seri_device->lcr = 0;
+
+	if((cmd & IOCTL_WL6) && (cmd & IOCTL_WL7))
+		seri_device->lcr |= UART_LCR_WLEN8;
+	else if(cmd & IOCTL_WL6)
+		seri_device->lcr |= UART_LCR_WLEN6;
+	else if(cmd & IOCTL_WL7)
+		seri_device->lcr |= UART_LCR_WLEN7;
+	if(cmd & IOCTL_SB2)
+		seri_device->lcr |= UART_LCR_STOP;
+	if((cmd & UART_LCR_PARITY) && (cmd & UART_LCR_EPAR) && (cmd & UART_LCR_SPAR))
+		seri_device->lcr |= UART_LCR_PARITY | UART_LCR_EPAR | UART_LCR_SPAR;
+	else if((cmd & UART_LCR_PARITY) && (cmd & UART_LCR_EPAR))
+		seri_device->lcr |= UART_LCR_PARITY | UART_LCR_EPAR;
+	else if((cmd & UART_LCR_PARITY) && (cmd & UART_LCR_SPAR))
+		seri_device->lcr |= UART_LCR_PARITY | UART_LCR_SPAR;
+	else if(cmd & UART_LCR_PARITY)
+		seri_device->lcr |= UART_LCR_PARITY;
+	if(cmd & IOCTL_BKE)
+		seri_device->lcr |= UART_LCR_SBC;
+
+	if(cmd & IOCTL_BRT) {
+		seri_bitrate = arg;
+		dl = seri_freq/seri_bitrate;
+		seri_device->lcr |= UART_LCR_DLAB;
+
+		outb(seri_device->lcr, seri_device->uart->start + UART_LCR);
+		seri_device->dll = (dl & 0x00FF);
+		outb(seri_device->dll, seri_device->uart->start + UART_DLL);
+		seri_device->dlm = (dl >> 8);
+		outb(seri_device->dlm, seri_device->uart->start + UART_DLM);
+		seri_device->lcr &= ~UART_LCR_DLAB;
+	}
+
+	outb(seri_device->lcr, seri_device->uart->start + UART_LCR);
+
+	return 0;
+}
+
 int seri_release(struct inode *inodeptr, struct file *fileptr) {
 	struct seri_dev_t *seri_device = fileptr->private_data;
 	printk(KERN_ALERT "  -K- seri_release was invoked!\n\n    -K- There was a total number of %d chars read and\n        a total of %d chars written to the otherside!!\n", seri_device->cread, seri_device->cwrite);
 
 	kfifo_free(seri_device->kfread);
 	kfifo_free(seri_device->kfwrite);
+	atomic_inc(&seri_device->s_available); //Release the device
 
 	return 0;
 }
@@ -326,10 +384,10 @@ irqreturn_t seri_interrupt(int irq, void *dev_id) {
 
 	//printk(KERN_ALERT "  -K- seri_interrupt was invoked!\n"); //Slows down the program..
 
-	//seri_device->lsr = inb(seri_device->uart->start + UART_LSR);
 	seri_device->iir = inb(seri_device->uart->start + UART_IIR);
 
 	if(seri_device->iir & UART_IIR_RDI) {
+		//seri_device->lsr = inb(seri_device->uart->start + UART_LSR);
 		/*if(seri_device->iir & UART_IIR_RLSI) {
 			if(seri_device->lsr & UART_LSR_OE) {
 				printk(KERN_ALERT "  -K- seri_interrupt there was an Overrun Error, is not sufficiently fast!\n");

@@ -28,6 +28,7 @@
 #include <linux/kfifo.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
+#include <linux/ioctl.h>
 //#include <linux/workqueue.h>
 
 #define SERI_MINOR    0
@@ -44,6 +45,20 @@
 #define SERI_DELAY    100
 #define SERI_IRQ      4
 #define MAX_FIFO_BUFF 4096
+
+#define IOCTL_WL5     0x00 //Set Word Length to 5
+#define IOCTL_WL6     0x01 //Set Word Length to 6
+#define IOCTL_WL7     0x02 //Set Word Length to 7
+#define IOCTL_WL8     0x03 //Set Word Length to 8
+#define IOCTL_SB1     0x00 //Set Number of Stop Bits to 1
+#define IOCTL_SB2     0x04 //Set Number of Stop Bits to 2
+#define IOCTL_PTN     0x00 //Set Parity to None
+#define IOCTL_PTO     0x08 //Set Parity to Odd
+#define IOCTL_PTE     0x18 //Set Parity to Even
+#define IOCTL_PT1     0x28 //Set Parity to 1
+#define IOCTL_PT0     0x38 //Set Parity to 0
+#define IOCTL_BKE     0x40 //Set Break Enable
+#define IOCTL_BRT     0x80 //Set Bit Rate (Should pass the value in the arg parameter)
 
 struct seri_dev_t {
   struct cdev cdev;
@@ -65,6 +80,7 @@ struct seri_dev_t {
   struct kfifo *kfread, *kfwrite; //Read and Write kfifos
   wait_queue_head_t qread, qwrite; //Read and Write Wait Queues
   struct semaphore sread, swrite; //Read and Write Wait Semaphores
+  atomic_t s_available; //Prevent more than one user
 };
 
 extern int seri_minor;
@@ -81,5 +97,6 @@ int seri_release(struct inode *inodeptr, struct file *fileptr);
 ssize_t seri_write(struct file *fileptr, const char __user *buff, size_t cmax, loff_t *offptr);
 ssize_t seri_read(struct file *fileptr, char __user *buff, size_t cmax, loff_t *offptr);
 irqreturn_t seri_interrupt(int irq, void *dev_id);
+int seri_ioctl(struct inode *inodeptr, struct file *fileptr, unsigned int cmd, unsigned long arg);
 
 #endif
