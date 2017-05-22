@@ -59,12 +59,12 @@ struct seri_dev_t {
   unsigned char lsr;
   unsigned char ier;
   unsigned char iir;
+  //struct semaphore *sem; //No need, using kfifo lock!
   size_t cmax;
   char *tbuff;
-  spinlock_t lread, lwrite; //Read and Write spinlocks for kfifos
+  spinlock_t lread, lwrite; //Read and Write locks for kfifos
   struct kfifo *kfread, *kfwrite; //Read and Write kfifos
   wait_queue_head_t qread, qwrite; //Read and Write Wait Queues
-  struct semaphore sread, swrite; //Read and Write Wait Semaphores
 };
 
 extern int seri_minor;
